@@ -12,7 +12,7 @@ import {
 import {
   getDownloadURL,
   ref,
-  uploadBytes,
+  uploadBytesResumable,
 } from "firebase/storage";
 
 const ITEMS_PER_PAGE = 8;
@@ -23,6 +23,9 @@ function App() {
   const [mediaItems, setMediaItems] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatusText, setUploadStatusText] = useState("");
+  
 
   const audioRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -92,36 +95,74 @@ function App() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+const handleFileChange = async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
 
-    try {
-      setUploading(true);
+  try {
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText(`0 / ${files.length} 업로드 중`);
 
+    let uploadedCount = 0;
+
+    for (const file of files) {
       const fileType = file.type.startsWith("video") ? "video" : "image";
       const fileName = `${Date.now()}_${file.name}`;
       const storageRef = ref(storage, `albums/${fileName}`);
 
-      await uploadBytes(storageRef, file);
-      const downloadUrl = await getDownloadURL(storageRef);
+      await new Promise((resolve, reject) => {
+        const uploadTask = uploadBytesResumable(storageRef, file);
 
-      await addDoc(collection(db, "albums"), {
-        url: downloadUrl,
-        type: fileType,
-        createdAt: serverTimestamp(),
-        name: file.name,
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            const fileProgress =
+              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+
+            const totalProgress =
+              ((uploadedCount + fileProgress / 100) / files.length) * 100;
+
+            setUploadProgress(Math.round(totalProgress));
+            setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 중`);
+          },
+          (error) => reject(error),
+          async () => {
+            try {
+              const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+
+              await addDoc(collection(db, "albums"), {
+                url: downloadUrl,
+                type: fileType,
+                createdAt: serverTimestamp(),
+                name: file.name,
+              });
+
+              uploadedCount += 1;
+              setUploadProgress(Math.round((uploadedCount / files.length) * 100));
+              setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 완료`);
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          }
+        );
       });
-
-      await loadMedia();
-      e.target.value = "";
-    } catch (error) {
-      console.error("업로드 실패:", error);
-      alert("업로드에 실패했습니다.");
-    } finally {
-      setUploading(false);
     }
-  };
+
+    await loadMedia();
+    e.target.value = "";
+  } catch (error) {
+    console.error("업로드 실패:", error);
+    alert("업로드에 실패했습니다.");
+  } finally {
+    setUploading(false);
+    setTimeout(() => {
+      setUploadProgress(0);
+      setUploadStatusText("");
+    }, 1000);
+  }
+};
 
   const totalPages = Math.ceil(mediaItems.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -179,13 +220,14 @@ function App() {
             <h2 className="album-title">추억 앨범</h2>
 
             <>
-              <input
-                type="file"
-                accept="image/*,video/*"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                style={{ display: "none" }}
-              />
+            <input
+               type="file"
+               accept="image/*,video/*"
+               multiple
+               ref={fileInputRef}
+               onChange={handleFileChange}
+               style={{ display: "none" }}
+            />
               <button
                 className="upload-button"
                 onClick={handleUploadClick}
@@ -195,6 +237,18 @@ function App() {
               </button>
             </>
           </div>
+
+          {uploading && (
+           <div className="upload-progress-wrap">
+              <div className="upload-progress-text">{uploadStatusText}</div>
+              <div className="upload-progress-bar">
+              <div
+                className="upload-progress-fill"
+                style={{ width: `${uploadProgress}%` }}
+              />
+              </div>
+           </div>
+          )}
 
           {currentItems.length === 0 ? (
             <div className="empty-message">아직 업로드된 추억이 없습니다.</div>
