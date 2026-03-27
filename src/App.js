@@ -136,7 +136,7 @@ function App() {
         ref={audioRef}
         loop
         preload="auto"
-        src="/memorial-music.mp3"
+        src={`${process.env.PUBLIC_URL}/memorial-music.mp3`}
       />
 
       <div className="mini-music-player">
@@ -155,9 +155,9 @@ function App() {
       <div className="memorial-container">
         <section className="hero-section">
           <img
-            className="hero-image"
-            src="/loveStar.jpg"
-            alt="사랑하는 별이"
+           className="hero-image"
+           src={`${process.env.PUBLIC_URL}/loveStar.jpg`}
+           alt="사랑하는 별이"
           />
 
           <div className="hero-text">
