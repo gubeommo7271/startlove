@@ -206,7 +206,25 @@ body {
   object-fit: cover;
   display: block;
 }
+.modal-download-button {
+  position: absolute;
+  top: 12px;
+  right: 60px;
+  border: none;
+  background: rgba(47, 38, 34, 0.85);
+  color: #fff;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: "Noto Serif KR", serif;
+  z-index: 2;
+}
 
+.modal-download-button:hover {
+  background: rgba(47, 38, 34, 1);
+}
 .video-badge {
   position: absolute;
   right: 12px;

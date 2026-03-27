@@ -95,6 +95,27 @@ function App() {
     fileInputRef.current?.click();
   };
 
+  const handleDownload = async () => {
+  if (!selectedMedia?.url) return;
+
+  try {
+    const response = await fetch(selectedMedia.url);
+    const blob = await response.blob();
+
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = selectedMedia.name || "download";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error("다운로드 실패:", error);
+    alert("다운로드에 실패했습니다.");
+  }
+};
+
 const handleFileChange = async (e) => {
   const files = Array.from(e.target.files || []);
   if (files.length === 0) return;
@@ -207,7 +228,7 @@ const handleFileChange = async (e) => {
             </p>
             <h1 className="hero-title">소중한 별이를 기억하며</h1>
             <p className="hero-message">
-              세상에서 가장 이쁜 별이와 함께한 13년.그 동안 고마웠고 사랑해.
+              세상에서 가장 이쁜 별이와 함께한 13년.그동안 고마웠고 사랑해.
             </p>
             <p className="hero-subtext">
               별이와 함께한 따뜻한 순간들을 사진과 영상으로 간직하는 공간입니다.
@@ -318,6 +339,13 @@ const handleFileChange = async (e) => {
             >
               ×
             </button>
+
+             <button
+               className="modal-download-button"
+               onClick={handleDownload}
+             >
+             다운로드
+             </button>
 
             {selectedMedia.type === "image" ? (
               <img
