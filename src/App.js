@@ -207,7 +207,7 @@ const handleFileChange = async (e) => {
             </p>
             <h1 className="hero-title">소중한 별이를 기억하며</h1>
             <p className="hero-message">
-              함께한 시간은 지나갔지만, 사랑은 여전히 우리 곁에 머물러 있어.
+              세상에서 가장 이쁜 별이와 함께한 13년.그 동안 고마웠고 사랑해.
             </p>
             <p className="hero-subtext">
               별이와 함께한 따뜻한 순간들을 사진과 영상으로 간직하는 공간입니다.
