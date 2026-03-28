@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { db, storage } from "./firebase";
+import { doc, updateDoc } from "firebase/firestore";
 import {
   addDoc,
   collection,
@@ -68,21 +69,27 @@ function App() {
     setIsPlaying(false);
   };
 
-  const loadMedia = async () => {
-    try {
-      const q = query(collection(db, "albums"), orderBy("createdAt", "desc"));
+ const loadMedia = async () => {
+  try {
+    const q = query(collection(db, "albums"), orderBy("createdAt", "desc"));
 
-      const snapshot = await getDocs(q);
-      const items = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+    const snapshot = await getDocs(q);
+    const items = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-      setMediaItems(items);
-    } catch (error) {
-      console.error("목록 불러오기 실패:", error);
-    }
-  };
+    console.log("전체 items:", items);
+    console.log(
+      "동영상만:",
+      items.filter((item) => item.type === "video")
+    );
+
+    setMediaItems(items);
+  } catch (error) {
+    console.error("목록 불러오기 실패:", error);
+  }
+};
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -305,27 +312,29 @@ function App() {
         </section>
 
         <section className="album-section">
-          <div className="album-header">
-            <h2 className="album-title">추억 앨범</h2>
+         <div className="album-header">
+  <h2 className="album-title">추억 앨범</h2>
 
-            <>
-              <input
-                type="file"
-                accept="image/*,video/*"
-                multiple
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                style={{ display: "none" }}
-              />
-              <button
-                className="upload-button"
-                onClick={handleUploadClick}
-                disabled={uploading}
-              >
-                {uploading ? "업로드 중..." : "사진 / 동영상 업로드"}
-              </button>
-            </>
-          </div>
+  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+    <input
+      type="file"
+      accept="image/*,video/*"
+      multiple
+      ref={fileInputRef}
+      onChange={handleFileChange}
+      style={{ display: "none" }}
+    />
+
+    <button
+      className="upload-button"
+      onClick={handleUploadClick}
+      disabled={uploading}
+    >
+      {uploading ? "업로드 중..." : "사진 / 동영상 업로드"}
+    </button>
+
+  </div>
+</div>
 
           {uploading && (
             <div className="upload-progress-wrap">
@@ -342,45 +351,38 @@ function App() {
           {mediaItems.length === 0 ? (
             <div className="empty-message">아직 업로드된 추억이 없습니다.</div>
           ) : (
-            <div className="album-grid">
-              {mediaItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="album-card"
-                  onClick={() => setSelectedMedia(item)}
-                >
-                  <div className="album-card-inner">
-                    {item.type === "image" ? (
-                      <img
-                        src={item.url}
-                        alt="추억 미디어"
-                        className="album-media"
-                      />
-                    ) : (
-                      <>
-                        {item.thumbnailUrl ? (
-                          <img
-                            src={item.thumbnailUrl}
-                            alt="동영상 썸네일"
-                            className="album-media"
-                          />
-                        ) : (
-                          <video
-                            className="album-media"
-                            muted
-                            playsInline
-                            preload="metadata"
-                          >
-                            <source src={item.url} />
-                          </video>
-                        )}
-                        <div className="video-badge">동영상</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+           <div className="album-grid">
+  {mediaItems.map((item) => (
+    <div
+      key={item.id}
+      className="album-card"
+      onClick={() => setSelectedMedia(item)}
+    >
+      <div className="album-card-inner">
+       {item.type === "image" ? (
+  <img
+    src={item.url}
+    alt="추억 미디어"
+    className="album-media"
+  />
+) : (
+  <>
+    <img
+      src={item.thumbnailUrl || `${process.env.PUBLIC_URL}/video-placeholder.jpg`}
+      alt="동영상 썸네일"
+      className="album-media"
+      onError={(e) => {
+        e.currentTarget.onerror = null;
+        e.currentTarget.src = `${process.env.PUBLIC_URL}/video-placeholder.jpg`;
+      }}
+    />
+    <div className="video-badge">동영상</div>
+  </>
+)}
+      </div>
+    </div>
+  ))}
+</div>
           )}
         </section>
       </div>
