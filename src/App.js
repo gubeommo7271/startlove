@@ -219,38 +219,40 @@ function App() {
               setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 중`);
             },
             (error) => reject(error),
-            async () => {
-              try {
-                const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+           async () => {
+  try {
+    const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
 
-                let thumbnailUrl = "";
+    const docRef = await addDoc(collection(db, "albums"), {
+      url: downloadUrl,
+      type: fileType,
+      createdAt: serverTimestamp(),
+      name: file.name,
+      thumbnailUrl: "",
+    });
 
-                if (fileType === "video") {
-                  try {
-                    thumbnailUrl = await getVideoPosterUrl(file, fileName);
-                  } catch (thumbError) {
-                    console.error("동영상 썸네일 생성 실패:", thumbError);
-                  }
-                }
+    if (fileType === "video") {
+      getVideoPosterUrl(file, fileName)
+        .then(async (thumbnailUrl) => {
+          await updateDoc(doc(db, "albums", docRef.id), {
+            thumbnailUrl,
+          });
+          console.log("썸네일 업데이트 완료:", file.name);
+          await loadMedia();
+        })
+        .catch((thumbError) => {
+          console.error("동영상 썸네일 생성 실패:", file.name, thumbError);
+        });
+    }
 
-                await addDoc(collection(db, "albums"), {
-                  url: downloadUrl,
-                  type: fileType,
-                  createdAt: serverTimestamp(),
-                  name: file.name,
-                  thumbnailUrl,
-                });
-
-                uploadedCount += 1;
-                setUploadProgress(
-                  Math.round((uploadedCount / files.length) * 100)
-                );
-                setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 완료`);
-                resolve();
-              } catch (error) {
-                reject(error);
-              }
-            }
+    uploadedCount += 1;
+    setUploadProgress(Math.round((uploadedCount / files.length) * 100));
+    setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 완료`);
+    resolve();
+  } catch (error) {
+    reject(error);
+  }
+}
           );
         });
       }
