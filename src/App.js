@@ -24,6 +24,7 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatusText, setUploadStatusText] = useState("");
+  const [showBackfillButton, setShowBackfillButton] = useState(false);
 
   const audioRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -116,69 +117,179 @@ function App() {
     }
   };
 
-  const createVideoThumbnail = (file) => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement("video");
-      const canvas = document.createElement("canvas");
-      const url = URL.createObjectURL(file);
+  const backfillVideoThumbnails = async () => {
+  try {
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText("기존 동영상 썸네일 복구 중...");
 
-      video.preload = "metadata";
-      video.muted = true;
-      video.playsInline = true;
-      video.src = url;
+    const q = query(collection(db, "albums"), orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
 
-      video.onloadeddata = () => {
-        try {
-          video.currentTime = Math.min(1, video.duration || 1);
-        } catch (error) {
-          URL.revokeObjectURL(url);
-          reject(error);
-        }
-      };
-
-      video.onseeked = () => {
-        try {
-          const width = video.videoWidth;
-          const height = video.videoHeight;
-
-          if (!width || !height) {
-            URL.revokeObjectURL(url);
-            reject(new Error("동영상 썸네일 크기를 가져올 수 없습니다."));
-            return;
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(video, 0, 0, width, height);
-
-          canvas.toBlob(
-            (blob) => {
-              URL.revokeObjectURL(url);
-
-              if (!blob) {
-                reject(new Error("썸네일 생성 실패"));
-                return;
-              }
-
-              resolve(blob);
-            },
-            "image/jpeg",
-            0.85
-          );
-        } catch (error) {
-          URL.revokeObjectURL(url);
-          reject(error);
-        }
-      };
-
-      video.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error("동영상 로드 실패"));
-      };
+    const targets = snapshot.docs.filter((docSnap) => {
+      const data = docSnap.data();
+      return (
+        data.type === "video" &&
+        data.url &&
+        (!data.thumbnailUrl || data.thumbnailUrl.trim() === "")
+      );
     });
-  };
+
+    if (targets.length === 0) {
+      alert("복구할 동영상이 없습니다.");
+      return;
+    }
+
+    let doneCount = 0;
+
+    for (const docSnap of targets) {
+      const data = docSnap.data();
+
+      try {
+        setUploadStatusText(`복구 중: ${data.name || docSnap.id}`);
+
+        const response = await fetch(data.url);
+        if (!response.ok) {
+          throw new Error(`fetch 실패: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        const file = new File(
+          [blob],
+          data.name || `${docSnap.id}.mp4`,
+          { type: blob.type || "video/mp4" }
+        );
+
+        const thumbnailBlob = await createVideoThumbnail(file);
+        const thumbnailRef = ref(storage, `albums/thumbnails/${docSnap.id}.jpg`);
+
+        await uploadBytes(thumbnailRef, thumbnailBlob);
+        const thumbnailUrl = await getDownloadURL(thumbnailRef);
+
+        await updateDoc(doc(db, "albums", docSnap.id), {
+          thumbnailUrl,
+        });
+
+        doneCount += 1;
+        setUploadProgress(Math.round((doneCount / targets.length) * 100));
+        console.log("복구 성공:", data.name || docSnap.id, thumbnailUrl);
+      } catch (error) {
+        console.error("복구 실패:", data.name || docSnap.id, error);
+      }
+    }
+
+    await loadMedia();
+    alert(`썸네일 복구 완료 (${doneCount} / ${targets.length})`);
+  } catch (error) {
+    console.error("썸네일 복구 전체 실패:", error);
+    alert("썸네일 복구 중 오류가 발생했습니다.");
+  } finally {
+    setUploading(false);
+    setTimeout(() => {
+      setUploadProgress(0);
+      setUploadStatusText("");
+    }, 1000);
+  }
+};
+
+ const createVideoThumbnail = (file) => {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const canvas = document.createElement("canvas");
+    const url = URL.createObjectURL(file);
+
+    let finished = false;
+
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      video.load();
+    };
+
+    const succeed = (blob) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      cleanup();
+      resolve(blob);
+    };
+
+    const fail = (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      cleanup();
+      reject(error);
+    };
+
+    const timeoutId = setTimeout(() => {
+      fail(new Error("썸네일 생성 시간 초과"));
+    }, 10000);
+
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+
+    video.onloadedmetadata = () => {
+      try {
+        const targetTime =
+          Number.isFinite(video.duration) && video.duration > 1 ? 1 : 0;
+
+        setTimeout(() => {
+          try {
+            video.currentTime = targetTime;
+          } catch (error) {
+            fail(error);
+          }
+        }, 200);
+      } catch (error) {
+        fail(error);
+      }
+    };
+
+    video.onseeked = () => {
+      try {
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+
+        if (!width || !height) {
+          fail(new Error("동영상 썸네일 크기를 가져올 수 없습니다."));
+          return;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          fail(new Error("canvas context 생성 실패"));
+          return;
+        }
+
+        ctx.drawImage(video, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              fail(new Error("썸네일 생성 실패"));
+              return;
+            }
+            succeed(blob);
+          },
+          "image/jpeg",
+          0.85
+        );
+      } catch (error) {
+        fail(error);
+      }
+    };
+
+    video.onerror = () => {
+      fail(new Error("동영상 로드 실패"));
+    };
+  });
+};
 
   const getVideoPosterUrl = async (file, fileName) => {
     const thumbnailBlob = await createVideoThumbnail(file);
@@ -188,88 +299,94 @@ function App() {
   };
 
   const handleFileChange = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
 
-    try {
-      setUploading(true);
-      setUploadProgress(0);
-      setUploadStatusText(`0 / ${files.length} 업로드 중`);
-
-      let uploadedCount = 0;
-
-      for (const file of files) {
-        const fileType = file.type.startsWith("video") ? "video" : "image";
-        const fileName = `${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `albums/${fileName}`);
-
-        await new Promise((resolve, reject) => {
-          const uploadTask = uploadBytesResumable(storageRef, file);
-
-          uploadTask.on(
-            "state_changed",
-            (snapshot) => {
-              const fileProgress =
-                (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-
-              const totalProgress =
-                ((uploadedCount + fileProgress / 100) / files.length) * 100;
-
-              setUploadProgress(Math.round(totalProgress));
-              setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 중`);
-            },
-            (error) => reject(error),
-           async () => {
   try {
-    const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText(`0 / ${files.length} 업로드 중`);
 
-    const docRef = await addDoc(collection(db, "albums"), {
-      url: downloadUrl,
-      type: fileType,
-      createdAt: serverTimestamp(),
-      name: file.name,
-      thumbnailUrl: "",
-    });
+    let uploadedCount = 0;
 
-    if (fileType === "video") {
-      getVideoPosterUrl(file, fileName)
-        .then(async (thumbnailUrl) => {
-          await updateDoc(doc(db, "albums", docRef.id), {
-            thumbnailUrl,
-          });
-          console.log("썸네일 업데이트 완료:", file.name);
-          await loadMedia();
-        })
-        .catch((thumbError) => {
-          console.error("동영상 썸네일 생성 실패:", file.name, thumbError);
-        });
+    for (const file of files) {
+      const fileType = file.type.startsWith("video") ? "video" : "image";
+      const fileName = `${Date.now()}_${file.name}`;
+      const storageRef = ref(storage, `albums/${fileName}`);
+
+      await new Promise((resolve, reject) => {
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            const fileProgress =
+              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+
+            const totalProgress =
+              ((uploadedCount + fileProgress / 100) / files.length) * 100;
+
+            setUploadProgress(Math.round(totalProgress));
+            setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 중`);
+          },
+          (error) => {
+            console.error("스토리지 업로드 실패:", file.name, error);
+            reject(error);
+          },
+          async () => {
+            try {
+              const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+
+              const docRef = await addDoc(collection(db, "albums"), {
+                url: downloadUrl,
+                type: fileType,
+                createdAt: serverTimestamp(),
+                name: file.name,
+                thumbnailUrl: "",
+              });
+
+              if (fileType === "video") {
+                getVideoPosterUrl(file, fileName)
+                  .then(async (thumbnailUrl) => {
+                    await updateDoc(doc(db, "albums", docRef.id), {
+                      thumbnailUrl,
+                    });
+                    console.log("썸네일 업데이트 완료:", file.name);
+                    await loadMedia();
+                  })
+                  .catch((thumbError) => {
+                    console.error("동영상 썸네일 생성 실패:", file.name, thumbError);
+                  });
+              }
+
+              uploadedCount += 1;
+              setUploadProgress(
+                Math.round((uploadedCount / files.length) * 100)
+              );
+              setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 완료`);
+              resolve();
+            } catch (error) {
+              console.error("Firestore 저장 실패:", file.name, error);
+              reject(error);
+            }
+          }
+        );
+      });
     }
 
-    uploadedCount += 1;
-    setUploadProgress(Math.round((uploadedCount / files.length) * 100));
-    setUploadStatusText(`${uploadedCount} / ${files.length} 업로드 완료`);
-    resolve();
+    await loadMedia();
+    e.target.value = "";
   } catch (error) {
-    reject(error);
+    console.error("업로드 실패:", error);
+    alert("업로드에 실패했습니다.");
+  } finally {
+    setUploading(false);
+    setTimeout(() => {
+      setUploadProgress(0);
+      setUploadStatusText("");
+    }, 1000);
   }
-}
-          );
-        });
-      }
-
-      await loadMedia();
-      e.target.value = "";
-    } catch (error) {
-      console.error("업로드 실패:", error);
-      alert("업로드에 실패했습니다.");
-    } finally {
-      setUploading(false);
-      setTimeout(() => {
-        setUploadProgress(0);
-        setUploadStatusText("");
-      }, 1000);
-    }
-  };
+};
 
   return (
     <div className="App">
@@ -314,8 +431,13 @@ function App() {
         </section>
 
         <section className="album-section">
-         <div className="album-header">
-  <h2 className="album-title">추억 앨범</h2>
+   <div className="album-header">
+  <h2
+    className="album-title"
+    onDoubleClick={() => setShowBackfillButton((prev) => !prev)}
+  >
+    추억 앨범
+  </h2>
 
   <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
     <input
@@ -335,6 +457,15 @@ function App() {
       {uploading ? "업로드 중..." : "사진 / 동영상 업로드"}
     </button>
 
+    {showBackfillButton && (
+      <button
+        className="upload-button"
+        onClick={backfillVideoThumbnails}
+        disabled={uploading}
+      >
+        이전 동영상 썸네일 복구
+      </button>
+    )}
   </div>
 </div>
 
